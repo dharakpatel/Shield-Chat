@@ -1,8 +1,9 @@
-chainlit
-langchain
-langchain_community
-PyPDF2
-chromadb
-groq
-langchain-groq
-ollama
+chainlit==1.1.304
+langchain==0.2.5
+langchain-community==0.2.5
+langchain-core==0.2.9
+langchain-groq==0.1.5
+PyPDF2==3.0.1
+chromadb==0.5.3
+groq==0.9.0
+ollama==0.2.1

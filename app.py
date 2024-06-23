@@ -1,3 +1,4 @@
+import re
 import PyPDF2
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -8,22 +9,34 @@ from langchain_groq import ChatGroq
 from langchain.memory import ChatMessageHistory, ConversationBufferMemory
 import chainlit as cl
 
-# for chainlit, .env is loaded automatically
-#from dotenv import load_dotenv
-#load_dotenv()  #
-#groq_api_key = os.environ['GROQ_API_KEY']
-
-llm_local = ChatOllama(model="mistral:instruct")
 llm_groq = ChatGroq(
-            #groq_api_key=groq_api_key,
-            #model_name='llama2-70b-4096' 
-            model_name='mixtral-8x7b-32768'
+            model_name='llama3-70b-8192'
     )
+
+# Define the sanitization function
+def sanitize_text(text):
+    # Regex patterns to match sensitive information
+    patterns = {
+        'aadhaar': r'\b\d{4}\s\d{4}\s\d{4}\b',
+        'pan': r'\b[a-zA-Z]{5}[0-9]{4}[a-zA-Z]\b',
+        'medical_beneficiary': r'\b\d[A-Z]{2}\d-[A-Z]{2}\d-[A-Z]{2}\d{2}\b',
+        'credit_card': r'\b(4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|2[2-7][0-9]{14})\b',
+        'bank_account': r'\b[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}\b',
+        'email': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+        'phone': r'\b(\+\d{1,2}\s?)?1?\-?\.?\s?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b',  
+        'address': r'\b[0-9]{1,5}( [a-zA-Z.]*){1,4},?( [a-zA-Z]*){1,3},? [a-zA-Z]{2},? [0-9]{5}\b', 
+        'ssn': r'\b(?!(000|666|9))\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
+    }
+
+    for key, pattern in patterns.items():
+        text = re.sub(pattern, f'[{key}_removed]', text)
+    
+    return text
 
 @cl.on_chat_start
 async def on_chat_start():
     
-    files = None #Initialize variable to store uploaded files
+    files = None # Initialize variable to store uploaded files
 
     # Wait for the user to upload a file
     while files is None:
@@ -45,18 +58,19 @@ async def on_chat_start():
     pdf_text = ""
     for page in pdf.pages:
         pdf_text += page.extract_text()
-        
 
-    # Split the text into chunks
+    # Sanitize the extracted text
+    sanitized_text = sanitize_text(pdf_text)
+
+    # Split the sanitized text into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    texts = text_splitter.split_text(pdf_text)
+    texts = text_splitter.split_text(sanitized_text)
 
     # Create a metadata for each chunk
     metadatas = [{"source": f"{i}-pl"} for i in range(len(texts))]
 
     # Create a Chroma vector store
     embeddings = OllamaEmbeddings(model="nomic-embed-text")
-    #embeddings = OllamaEmbeddings(model="llama2:7b")
     docsearch = await cl.make_async(Chroma.from_texts)(
         texts, embeddings, metadatas=metadatas
     )
@@ -74,7 +88,7 @@ async def on_chat_start():
 
     # Create a chain that uses the Chroma vector store
     chain = ConversationalRetrievalChain.from_llm(
-        llm = llm_local,
+        llm = llm_groq,
         chain_type="stuff",
         retriever=docsearch.as_retriever(),
         memory=memory,
@@ -91,7 +105,7 @@ async def on_chat_start():
 @cl.on_message
 async def main(message: cl.Message):
         
-     # Retrieve the chain from user session
+    # Retrieve the chain from user session
     chain = cl.user_session.get("chain") 
     #call backs happens asynchronously/parallel 
     cb = cl.AsyncLangchainCallbackHandler()
